@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Unified Chat — Website</title>
+<style>
+:root{--bg:#0f1724;--card:rgba(255,255,255,0.04);--accent:#ff6b3d}
+body{margin:0;font-family:Segoe UI,Arial;background:linear-gradient(135deg,var(--bg),#243447);color:#fff;display:flex;justify-content:center;padding:20px}
+.container{width:100%;max-width:980px;display:grid;grid-template-columns:1fr 360px;gap:16px}
+.card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.5)}
+header{grid-column:1/-1;text-align:center;margin-bottom:6px}
+h1{margin:0;font-size:18px}
+#messages{height:470px;overflow:auto;padding:12px;border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(0,0,0,0.04))}
+.msg{max-width:78%;padding:8px 12px;margin:8px 0;border-radius:10px}
+.me{margin-left:auto;background:linear-gradient(180deg,var(--accent),#ff5422)}
+.other{background:rgba(255,255,255,0.05)}
+.small{font-size:13px;color:rgba(255,255,255,0.75)}
+.controls{display:flex;gap:8px;margin-top:10px}
+input[type=text]{flex:1;padding:10px;border-radius:8px;border:none}
+button{padding:10px 12px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer}
+.req{padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.chip{background:rgba(255,255,255,0.06);padding:6px 10px;border-radius:20px}
+.footer{grid-column:1/-1;text-align:center;color:rgba(255,255,255,0.6);font-size:13px;padding-top:10px}
+@media(max-width:900px){.container{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <div class="container">
+    <header class="card"><h1>Unified Chat — Website</h1></header>
+
+    <div class="card">
+      <div class="small">API status: <span id="apiStatus">unknown</span></div>
+      <div id="messages"></div>
+
+      <div class="controls">
+        <input id="txt" type="text" placeholder="Type message..." />
+        <button id="send">Send</button>
+        <button id="refresh">Refresh</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="small">Connected devices</div>
+      <div id="devicesList" style="margin:8px 0"></div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+        <div class="small">Pending connection requests</div>
+        <button id="reloadReq" class="chip">Reload</button>
+      </div>
+      <div id="requestsList" style="margin-top:8px"></div>
+
+      <div style="margin-top:12px">
+        <div class="small">Quick actions</div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button id="checkApi">Check API</button>
+          <button id="clearLocal">Clear Local</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">Server API: <code id="apiBaseSpan"></code> — change <code>API_BASE</code> in file to point to deployed server if needed.</div>
+  </div>
+
+<script>
+/* ====== CONFIG: بدلنے کیلئے ====== */
+const API_BASE = "http://localhost:5000"; // اگر آپ سرور آن لائن رکھیں تو یہاں بدل دیں، مثال: https://xyz.onrender.com
+document.getElementById('apiBaseSpan').textContent = API_BASE;
+/* ================================== */
+
+const messagesDiv = document.getElementById('messages');
+const devicesDiv = document.getElementById('devicesList');
+const requestsDiv = document.getElementById('requestsList');
+const apiStatusSpan = document.getElementById('apiStatus');
+
+function esc(s){ return String(s).replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+function appendMsg(obj){
+  const d = document.createElement('div');
+  d.className = 'msg ' + (obj.from && obj.from.startsWith('Website') ? 'me' : 'other');
+  d.innerHTML = `<strong>${esc(obj.from||'System')}</strong>: ${esc(obj.text)} <div class="small">${new Date(obj.time||Date.now()).toLocaleTimeString()}</div>`;
+  messagesDiv.appendChild(d);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+/* ======= API helpers ======= */
+async function apiGET(path){
+  const res = await fetch(API_BASE + path);
+  if(!res.ok) throw new Error('Status '+res.status);
+  return res.json();
+}
+async function apiPOST(path, body){
+  const res = await fetch(API_BASE + path, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  if(!res.ok){
+    const txt = await res.text();
+    throw new Error(txt || ('Status '+res.status));
+  }
+  return res.json();
+}
+
+/* ====== main actions ====== */
+async function checkApi(){
+  apiStatusSpan.textContent = 'checking...';
+  try{
+    const j = await apiGET('/api/check');
+    apiStatusSpan.textContent = 'OK (' + new Date(j.time).toLocaleTimeString() + ')';
+    apiStatusSpan.style.color = 'lightgreen';
+  }catch(e){
+    apiStatusSpan.textContent = 'offline';
+    apiStatusSpan.style.color = 'salmon';
+  }
+}
+
+async function loadMessages(){
+  messagesDiv.innerHTML = '';
+  try{
+    const arr = await apiGET('/api/messages');
+    arr.forEach(m=> appendMsg(m));
+  }catch(e){
+    // fallback: localStorage
+    const local = JSON.parse(localStorage.getItem('localMessages')||'[]');
+    if(local.length){
+      local.forEach(m=> appendMsg(m));
+    } else {
+      appendMsg({from:'System', text:'No server & no local messages', time: Date.now()});
+    }
+  }
+}
+
+async function sendMessage(text){
+  const obj = { from: 'Website', text, time: new Date().toISOString() };
+  // try server first
+  try{
+    await apiPOST('/api/messages', { from: obj.from, text: obj.text });
+    await loadMessages();
+  }catch(e){
+    // store locally if server not available
+    const arr = JSON.parse(localStorage.getItem('localMessages')||'[]');
+    arr.push(obj);
+    localStorage.setItem('localMessages', JSON.stringify(arr));
+    appendMsg({from:'Local', text:'Saved locally: '+text, time:Date.now()});
+  }
+}
+
+/* devices & requests */
+async function loadDevices(){
+  try{
+    const arr = await apiGET('/api/devices');
+    devicesDiv.innerHTML = '';
+    arr.forEach(d=>{
+      const el = document.createElement('div');
+      el.className = 'small';
+      el.innerHTML = `${esc(d.name)} <span style="float:right">${d.connected?'<span style="color:lightgreen">connected</span>':'<span style="color:#f3f3f3">not connected</span>'}</span>`;
+      devicesDiv.appendChild(el);
+    });
+  }catch(e){
+    devicesDiv.innerHTML = '<div class="small">No server</div>';
+  }
+}
+
+async function loadRequests(){
+  try{
+    const arr = await apiGET('/api/requests');
+    requestsDiv.innerHTML = '';
+    if(arr.length===0){ requestsDiv.innerHTML = '<div class="small">No requests</div>'; return; }
+    arr.forEach(r=>{
+      const box = document.createElement('div');
+      box.className = 'req';
+      box.innerHTML = `<div><strong>${esc(r.name)}</strong><div class="small">${new Date(r.time).toLocaleString()}</div></div>
+        <div><button onclick="acceptRequest('${r.id}')">Accept</button></div>`;
+      requestsDiv.appendChild(box);
+    });
+  }catch(e){
+    requestsDiv.innerHTML = '<div class="small">No server</div>';
+  }
+}
+
+async function acceptRequest(id){
+  try{
+    const res = await apiPOST('/api/accept', { requestId: id });
+    appendMsg({ from: 'System', text: 'Accepted device '+res.deviceId, time: Date.now() });
+    await loadRequests(); await loadDevices();
+  }catch(e){
+    appendMsg({ from:'System', text:'Accept failed: '+e.message, time:Date.now()});
+  }
+}
+
+/* UI wiring */
+document.getElementById('send').addEventListener('click', ()=>{ const v=document.getElementById('txt').value.trim(); if(!v) return; sendMessage(v); document.getElementById('txt').value=''; });
+document.getElementById('refresh').addEventListener('click', ()=> loadMessages());
+document.getElementById('checkApi').addEventListener('click', checkApi);
+document.getElementById('reloadReq').addEventListener('click', loadRequests);
+document.getElementById('clearLocal').addEventListener('click', ()=> { localStorage.removeItem('localMessages'); loadMessages(); });
+
+/* auto refresh */
+setInterval(()=>{ loadMessages(); loadDevices(); loadRequests(); }, 3500);
+
+/* init */
+checkApi();
+loadMessages();
+loadDevices();
+loadRequests();
+</script>
+</body>
+</html>
