@@ -3,22 +3,27 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
+
+// ✅ CORS allow karo for all origins (web + desktop)
+app.use(cors({
+  origin: "*"
+}));
+
 app.use(bodyParser.json());
 
 let messages = [];
 
-// ✅ Root check
+// ✅ Root
 app.get("/", (req, res) => {
   res.json({ status: "API is running ✅" });
 });
 
-// ✅ Get all messages
+// ✅ Get messages
 app.get("/messages", (req, res) => {
   res.json(messages);
 });
 
-// ✅ Post new message
+// ✅ Post message
 app.post("/messages", (req, res) => {
   const msg = { text: req.body.text, createdAt: new Date() };
   messages.push(msg);
